@@ -1,0 +1,101 @@
+using System;
+using System.Windows.Forms;
+using Cognex.VisionPro.Display;
+using Cognex.VisionPro;
+
+namespace WindowsFormsApp2
+{
+    public partial class AcqFifo : Form
+    {
+        private AcqFifoToolManager acqManager;  // 카메라 제어 클래스 객체
+
+        public AcqFifo()
+        {
+            InitializeComponent();
+
+            // AcqFifoTool 객체 생성 및 초기화
+            acqManager = new AcqFifoToolManager();
+
+            // 비디오 포맷 콤보박스 초기화
+            var formats = acqManager.GetAvailableVideoFormats();
+            videoformat.Items.Clear();
+            videoformat.Items.AddRange(formats);
+            
+        }
+
+        // 폼 로드
+        private void AcqFifo_Load(object sender, EventArgs e)
+        {
+            btn_acq.Enabled = false;
+        }
+
+        // 비디오 포맷 선택
+        private void videoformat_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (videoformat.SelectedItem != null)
+            {
+                acqManager.SetVideoFormat(videoformat.SelectedItem.ToString());
+                btn_acq.Enabled = true;
+            }
+        }
+
+        // 1회 이미지 취득
+        private void btn_acq_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var image = acqManager.AcquireImage();
+                if (image != null)
+                    cogdisplay2.Image = image;
+                else
+                    MessageBox.Show("이미지를 가져올 수 없습니다.");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"이미지 취득 실패: {ex.Message}");
+            }
+        }
+
+        // 라이브 ON/OFF 토글
+        private void btn_on_Click(object sender, EventArgs e)
+        {
+            if (!cogdisplay2.LiveDisplayRunning)
+            {
+                acqManager.StartLive(cogdisplay2);
+                btn_on.Text = "Stop Livedisplay";
+            }
+            else
+            {
+                acqManager.StopLive(cogdisplay2);
+                btn_on.Text = "Start Livedisplay";
+            }
+            }
+
+        // 밝기 조절
+        private void brightnessUpDown_ValueChanged(object sender, EventArgs e)
+        { 
+            acqManager.AcqFifo.OwnedBrightnessParams.Brightness = (double)brightnessUpDown.Value;
+            brightnessUpDown.Value = (decimal)(acqManager.Brightness * 100.0);
+        }
+
+        // 대비 조절
+        private void contrastUpDown_ValueChanged(object sender, EventArgs e)
+        {
+            acqManager.AcqFifo.OwnedContrastParams.Contrast = (double)contrastUpDown.Value;
+            contrastUpDown.Value = (decimal)(acqManager.Contrast * 100.0);
+        }
+
+        // 노출 조절
+        private void exposureUpDown_ValueChanged(object sender, EventArgs e)
+        {
+            acqManager.AcqFifo.OwnedExposureParams.Exposure = (double)exposureUpDown.Value;
+            exposureUpDown.Value = (decimal)(acqManager.Exposure * 10000.0);
+        }
+
+        // 폼 종료 시 리소스 정리
+        private void AcqFifo_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            acqManager.Dispose();
+        }
+    }
+}
