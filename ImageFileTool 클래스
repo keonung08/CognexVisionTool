@@ -1,0 +1,105 @@
+using Cognex.VisionPro;
+using Cognex.VisionPro.ImageFile;
+using System;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Windows.Forms;
+
+namespace WindowsFormsApp3
+{
+    public class ImageFileToolManager : IDisposable
+    {
+        private string[] imageFiles;              // 이미지 파일 경로 배열
+        private int currentImageIndex = 0;        // 현재 이미지 인덱스
+        private CogImageFileTool imageFileTool;   // 이미지 로딩용
+
+        public ImageFileToolManager()
+        {
+            imageFileTool = new CogImageFileTool();
+        }
+
+        // ImageFileTool 프로퍼티
+        public CogImageFileTool ImageFileTool
+        {
+            get { return imageFileTool; }
+        }
+
+        // 이미지 폴더 선택
+        public void LoadImageFolder()
+        {
+            using (FolderBrowserDialog folderDg = new FolderBrowserDialog())
+            {
+                folderDg.Description = "이미지 폴더를 선택하세요";
+                if (folderDg.ShowDialog() == DialogResult.OK)
+                {
+                    string folderPath = folderDg.SelectedPath;
+                    Regex regex = new Regex(@"\.(bmp|jpg|png|jpeg)$", RegexOptions.IgnoreCase);
+                    imageFiles = Directory.GetFiles(folderPath, "*.*")
+                                          .Where(f => regex.IsMatch(f))
+                                          .ToArray();
+
+                    if (imageFiles.Length == 0)
+                    {
+                        MessageBox.Show("선택한 폴더에 이미지 파일이 없습니다.");
+                        imageFiles = null;
+                    }
+                    else
+                    {
+                        currentImageIndex = 0;
+                    }
+                }
+            }
+        }
+
+        // 현재 이미지 로딩
+        public ICogImage LoadCurrentImage()
+        {
+            if (imageFiles == null || imageFiles.Length == 0)
+                return null;
+
+            imageFileTool.Operator.Open(imageFiles[currentImageIndex], CogImageFileModeConstants.Read);
+            imageFileTool.Run();
+            return imageFileTool.OutputImage;
+        }
+
+        // 다음 이미지
+        public ICogImage NextImage()
+        {
+            if (imageFiles == null || imageFiles.Length == 0)
+                return null;
+
+            currentImageIndex = (currentImageIndex + 1) % imageFiles.Length;
+            return LoadCurrentImage();
+        }
+
+        // 이전 이미지
+        public ICogImage PreviousImage()
+        {
+            if (imageFiles == null || imageFiles.Length == 0)
+                return null;
+
+            currentImageIndex--;
+            if (currentImageIndex < 0)
+                currentImageIndex = imageFiles.Length - 1;
+
+            return LoadCurrentImage();
+        }
+
+        // Dispose 구현
+        public void Dispose()
+        {
+            if (imageFileTool != null)
+            {
+                try
+                {
+                    imageFileTool.Operator?.Close();
+                }
+                catch { /* 이미 닫혀있을 수도 있음 */ }
+
+                imageFileTool.Dispose();
+                imageFileTool = null;
+            }
+        }
+    }
+}
