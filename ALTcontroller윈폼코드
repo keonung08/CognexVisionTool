@@ -1,0 +1,66 @@
+using System;
+using System.Windows.Forms;
+
+namespace altcontroller
+{
+    public partial class SerialPort : Form
+    {
+        private SerialPortManager PortManager;
+
+        public SerialPort()
+        {
+            InitializeComponent();
+            PortManager = new SerialPortManager();
+
+            // 이벤트 연결
+            // 람다식 문법 : (입력 파라미터) => {실행문장 블럭}
+            // ex) str => { MessageBox.Show(str);}
+            PortManager.DataReceived += msg => this.Invoke(new Action(() => listBox1.Items.Add(msg)));
+            PortManager.DataSent += msg => this.Invoke(new Action(() => listBox1.Items.Add("[TX] " + msg)));
+        }
+
+        private void serialPort_Load(object sender, EventArgs e)
+        {
+            string[] ports = PortManager.GetAvailablePorts();
+            comboBox1.Items.AddRange(ports);
+            if (ports.Length > 0)
+                comboBox1.SelectedIndex = 0;
+        }
+
+        private void btn_connect_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                bool opened = PortManager.TogglePort(comboBox1.Text);
+                listBox1.Items.Add(opened ? "포트 열림" : "포트 닫힘");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("포트 연결 오류: " + ex.Message);
+            }
+        }
+
+        private void btn_send_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                byte ch1 = Convert.ToByte(textBox1.Text);
+                byte ch2 = Convert.ToByte(textBox2.Text);
+                byte ch3 = Convert.ToByte(textBox3.Text);
+                byte ch4 = Convert.ToByte(textBox4.Text);
+
+                byte[] packet = PortManager.CreateAllChannelPacket(ch1, ch2, ch3, ch4);
+                PortManager.Send(packet);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("전송 오류: " + ex.Message);
+            }
+        }
+
+        private void listclear_Click(object sender, EventArgs e)
+        {
+            listBox1.Items.Clear();
+        }
+    }
+}
