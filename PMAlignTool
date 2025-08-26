@@ -1,0 +1,269 @@
+using Cognex.VisionPro;
+using Cognex.VisionPro.Display;
+using Cognex.VisionPro.ImageFile;
+using Cognex.VisionPro.PMAlign;
+using System;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Windows.Forms;
+using WindowsFormsApp2; // AcqFifoTool
+
+namespace WindowsFormsApp3
+{
+    public partial class PMAlign : Form
+    {
+        private PMAlignToolManager pmManager;
+        private AcqFifoToolManager acqManager;
+        private CogRectangleAffine trainRect;
+        private string[] imageFiles; // imagefile을 문자열 형식으로 개체 참조
+        private int currentImageIndex = 0; // 현재이미지 인덱스 0번 선언
+
+        public PMAlign()
+        {
+            InitializeComponent();
+            pmManager = new PMAlignToolManager();
+            acqManager = new AcqFifoToolManager();
+            
+        }
+
+        // 디스플레이 초기화 
+        private void DisplayClear(CogDisplay display, bool clearSearchRegion = true)
+        {
+            display.StaticGraphics.Clear();
+            if (clearSearchRegion) // 검색영역 초기화
+                display.InteractiveGraphics.Clear();
+            else
+                display.InteractiveGraphics.Remove("TrainROI"); // ROI만 제거
+        }
+
+        // 이미지 폴더 불러오기
+        private void btn_image_Click(object sender, EventArgs e)
+        {
+            using (FolderBrowserDialog folderDg = new FolderBrowserDialog())
+            {
+                folderDg.Description = "이미지 폴더를 선택하세요";
+                if (folderDg.ShowDialog() == DialogResult.OK)
+                {
+                    // 폴더경로를 문자열로 받아 선택
+                    string folderPath = folderDg.SelectedPath;
+                    // 정규식 Regex
+                    Regex regex = new Regex(@"\.(bmp|jpg|png|jpeg)$", RegexOptions.IgnoreCase);
+                    imageFiles = Directory.GetFiles(folderPath, "*.*").Where(f => regex.IsMatch(f)).ToArray();
+
+                    if (imageFiles.Length == 0)
+                        MessageBox.Show("선택한 폴더에 이미지 파일이 없습니다.");
+                    else
+                    {
+                        currentImageIndex = 0;
+                        LoadCurrentImage();
+                    }
+                }
+            }
+        }
+
+        // 현재 이미지 로드
+        private void LoadCurrentImage()
+        {
+            var image = LoadImageFromFile(imageFiles[currentImageIndex]);
+            if (image != null)
+            {
+                DisplayClear(MainDisplay);
+                MainDisplay.Image = image;
+                MainDisplay.Fit(true);
+            }
+        }
+
+        // 파일에서 이미지 로드
+        private ICogImage LoadImageFromFile(string filePath)
+        {
+            CogImageFileTool fileTool = new CogImageFileTool();
+            fileTool.Operator.Open(filePath, CogImageFileModeConstants.Read);
+            fileTool.Run(); 
+            return fileTool.OutputImage; 
+        }
+
+        // 다음 이미지 
+        private void btn_next_Click(object sender, EventArgs e)
+        {
+            if (imageFiles == null || imageFiles.Length == 0) return;
+            currentImageIndex++;
+            if (currentImageIndex >= imageFiles.Length)
+                currentImageIndex = 0;
+            LoadCurrentImage();
+        }
+        // 이전 이미지
+        private void btn_prev_Click(object sender, EventArgs e)
+        {
+            if (imageFiles == null || imageFiles.Length == 0) return;
+
+            currentImageIndex--;
+            if (currentImageIndex < 0)
+                currentImageIndex = imageFiles.Length - 1;
+
+            LoadCurrentImage();
+        }
+
+        // AcqFifoTool 이미지 취득
+        private void btn_acq_Click(object sender, EventArgs e)
+        {
+            DisplayClear(MainDisplay);
+            try
+            {
+                ICogImage image = acqManager.AcquireImage();
+                if (image == null)
+                {
+                    MessageBox.Show("이미지를 가져올 수 없습니다.");
+                    return;
+                }
+
+                MainDisplay.Image = image;
+                MainDisplay.Fit(true);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"이미지 취득 중 오류 발생: {ex.Message}");
+            }
+        }
+
+        // 학습영역 생성(중심 원점 포함)
+        private void btn_TrainRegion_Click(object sender, EventArgs e)
+        {
+            if (MainDisplay.Image == null)
+            {
+                MessageBox.Show("이미지가 없습니다.");
+                return;
+            }
+
+            trainRect = pmManager.CreateTrainRegion(MainDisplay.Image);
+            
+            trainRect.Changed -= TrainRect_Changed; // 이벤트 핸들러 삭제
+            trainRect.Changed += TrainRect_Changed; // 이벤트 핸들러 생성
+
+            MainDisplay.InteractiveGraphics.Add(trainRect, "TrainROI", true);
+
+            // 중심 마커 생성
+            var marker = pmManager.CreateCenterMarker(trainRect.CenterX, trainRect.CenterY);
+            MainDisplay.StaticGraphics.Add(marker, "CenterPoint");
+        }
+
+        // ROI 변경 시 중심 원점 갱신
+        private void TrainRect_Changed(object sender, EventArgs e)
+        {
+            var rect = sender as CogRectangleAffine;
+            if (rect == null) return;
+
+            var updatedMarker = pmManager.CreateCenterMarker(rect.CenterX, rect.CenterY);
+            MainDisplay.StaticGraphics.Remove("CenterPoint");
+            MainDisplay.StaticGraphics.Add(updatedMarker, "CenterPoint");
+        }
+
+        // 패턴 학습
+        private void btn_train_Click(object sender, EventArgs e)
+        {
+            if (MainDisplay.Image == null || trainRect == null)
+            {
+                MessageBox.Show("학습할 이미지 또는 ROI가 없습니다.");
+                return;
+            }
+
+            // 패턴 학습 실행
+            pmManager.TrainPattern(MainDisplay.Image, trainRect);
+
+            // 학습된 패턴 이미지 가져오기
+            ICogImage trainedImage = pmManager.PMAlignTool.Pattern.GetTrainedPatternImage();
+
+            // 학습된 패턴 이미지를 TrainDisplay에 표시
+            if (trainedImage != null)
+            {
+                TrainDisplay.Image = trainedImage;
+                TrainDisplay.Fit(true);
+            }
+
+            MessageBox.Show("패턴 학습 완료!");
+        }
+
+
+
+        // 결과 분석
+        private void btn_Execute_Click(object sender, EventArgs e)
+        {
+            DisplayClear(MainDisplay, false); // 검색영역은 유지
+            
+            if (!pmManager.PMAlignTool.Pattern.Trained)
+            {
+                MessageBox.Show("패턴이 학습되지 않았습니다.");
+                return;
+            }
+
+            if (MainDisplay.Image != null)
+            {
+                var results = pmManager.Run(MainDisplay.Image);
+                pmManager.DrawResults(results, MainDisplay);
+                label_result.Text = pmManager.GetResultText(results);
+            }
+        }
+
+        // 검색영역 설정
+        private void btn_search_Click(object sender, EventArgs e)
+        {
+            if (MainDisplay.Image == null)
+            {
+                MessageBox.Show("이미지가 없습니다.");
+                return;
+            }
+
+            var results = pmManager.Run(MainDisplay.Image);
+            if (results == null || results.Count == 0)
+            {
+                MessageBox.Show("패턴을 찾지 못했습니다.");
+                return;
+            }
+
+            var firstResult = results[0];
+            var searchRect = pmManager.CreateSearchRegion(firstResult);
+
+            MainDisplay.InteractiveGraphics.Remove("SearchRegion");
+            MainDisplay.InteractiveGraphics.Add(searchRect, "SearchRegion", true);
+
+            label_result.Text = pmManager.GetResultText(results);
+        }
+
+        // 저장
+        private void btn_save_Click(object sender, EventArgs e)
+        {
+            using (SaveFileDialog saveDlg = new SaveFileDialog())
+            {
+                saveDlg.Filter = "VPP 파일 (*.vpp)|*.vpp";
+                if (saveDlg.ShowDialog() == DialogResult.OK)
+                {
+                    pmManager.SaveToVpp(saveDlg.FileName);
+                    MessageBox.Show("VPP 저장 완료!");
+                }
+            }
+        }
+
+        // 불러오기
+        private void btn_vpp_Click(object sender, EventArgs e)
+        {
+            using (OpenFileDialog openDlg = new OpenFileDialog())
+            {
+                openDlg.Filter = "VPP 파일 (*.vpp)|*.vpp";
+                if (openDlg.ShowDialog() == DialogResult.OK)
+                {
+                    pmManager.LoadFromVpp(openDlg.FileName);
+                    MessageBox.Show("VPP 불러오기 성공!");
+                }
+            }
+        }
+
+        // 폼 종료 후 리소스 정리
+        private void align_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            acqManager.Dispose();
+            
+        }
+
+       
+    }
+}
