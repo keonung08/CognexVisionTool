@@ -1,0 +1,181 @@
+using System;
+using System.IO;
+using Cognex.VisionPro;
+using Cognex.VisionPro.Display;
+using Cognex.VisionPro.PMAlign;
+
+namespace WindowsFormsApp3
+{
+    public class PMAlignToolManager : IDisposable
+    {
+        private CogRectangleAffine trainRect;     // ROI 영역
+        private CogPMAlignTool pmAlignTool;       // PMAlignTool
+
+        // 외부 접근용 프로퍼티
+        public CogPMAlignTool PMAlignTool
+        {
+            get { return pmAlignTool; }
+            set { pmAlignTool = value; }
+        }
+
+        public PMAlignToolManager()
+        {
+            pmAlignTool = new CogPMAlignTool();
+            trainRect = new CogRectangleAffine();
+            InitPMAlign(); // 초기 설정
+        }
+
+        // PMAlignTool 초기 설정
+        private void InitPMAlign()
+        {
+            pmAlignTool.Pattern.TrainAlgorithm = CogPMAlignTrainAlgorithmConstants.PatMax;
+            pmAlignTool.RunParams.ZoneAngle.Configuration = CogPMAlignZoneConstants.LowHigh;
+            pmAlignTool.RunParams.ZoneAngle.Low = CogMisc.DegToRad(-180);
+            pmAlignTool.RunParams.ZoneAngle.High = CogMisc.DegToRad(180);
+            pmAlignTool.RunParams.AcceptThreshold = 0.4;
+            pmAlignTool.RunParams.RunAlgorithm = CogPMAlignRunAlgorithmConstants.PatMax;
+        }
+
+        // ROI 생성
+        public CogRectangleAffine CreateTrainRegion(ICogImage cogImage)
+        {
+            int w = ((CogImage8Grey)cogImage).Width;
+            int h = ((CogImage8Grey)cogImage).Height;
+
+            trainRect.SetCenterLengthsRotationSkew(w / 2, h / 2, 300, 300, 0, 0);
+            trainRect.GraphicDOFEnable = CogRectangleAffineDOFConstants.Position |
+                                         CogRectangleAffineDOFConstants.Size |
+                                         CogRectangleAffineDOFConstants.Rotation;
+
+            trainRect.Interactive = true;
+            trainRect.Color = CogColorConstants.Yellow;
+
+            return trainRect;
+        }
+
+        // 중심 좌표 마커
+        public CogPointMarker CreateCenterMarker(double x, double y)
+        {
+            return new CogPointMarker
+            {
+                X = x,
+                Y = y,
+                Color = CogColorConstants.Green,
+                SizeInScreenPixels = 12,
+                Rotation = 0
+            };
+        }
+
+        // 패턴 학습
+        public ICogImage TrainPattern(ICogImage cogImage, CogRectangleAffine region)
+        {
+            pmAlignTool.Pattern.TrainMode = CogPMAlignTrainModeConstants.Image;
+            pmAlignTool.Pattern.TrainImage = cogImage;
+            pmAlignTool.Pattern.TrainRegion = region;
+            pmAlignTool.Pattern.TrainRegionMode = CogRegionModeConstants.PixelAlignedBoundingBox;
+
+            pmAlignTool.Pattern.Origin.TranslationX = region.CenterX;
+            pmAlignTool.Pattern.Origin.TranslationY = region.CenterY;
+
+            pmAlignTool.Pattern.Train();
+
+            return pmAlignTool.Pattern.GetTrainedPatternImage(); // 학습된 패턴 이미지 반환
+        }
+
+        // 학습된 패턴 이미지 반환용 메서드
+        public ICogImage GetTrainedPatternImage()
+        {
+            if (pmAlignTool.Pattern == null || !pmAlignTool.Pattern.Trained)
+                throw new Exception("아직 패턴이 학습되지 않았습니다.");
+
+            return pmAlignTool.Pattern.GetTrainedPatternImage();
+        }
+
+        // 패턴 실행
+        public CogPMAlignResults Run(ICogImage cogImage)
+        {
+            if (!pmAlignTool.Pattern.Trained)
+                throw new Exception("학습된 패턴 없음.");
+
+            pmAlignTool.InputImage = cogImage;
+            pmAlignTool.Run();
+
+            return pmAlignTool.Results;
+        }
+
+        // 결과 텍스트 출력
+        public string GetResultText(CogPMAlignResults results)
+        {
+            if (results == null || results.Count == 0)
+                return "패턴 발견되지 않음.";
+
+            var r = results[0];
+            return $"Score: {r.Score:F2}, X: {r.GetPose().TranslationX:F2}, Y: {r.GetPose().TranslationY:F2}, Angle: {r.GetPose().Rotation:F2}";
+        }
+
+        // 검색영역 생성 (결과 위치 기반)
+        public CogRectangleAffine CreateSearchRegion(CogPMAlignResult result)
+        {
+            return new CogRectangleAffine
+            {
+                CenterX = result.GetPose().TranslationX,
+                CenterY = result.GetPose().TranslationY,
+                SideXLength = 300,
+                SideYLength = 300,
+                Rotation = result.GetPose().Rotation,
+                Color = CogColorConstants.Yellow
+            };
+        }
+
+        // 결과 그래픽 표시
+        public void DrawResults(CogPMAlignResults results, CogDisplay display)
+        {
+            display.StaticGraphics.Clear();
+
+            if (results == null || results.Count == 0)
+                return;
+
+            foreach (CogPMAlignResult result in results)
+            {
+                display.StaticGraphics.Add(
+                    result.CreateResultGraphics(CogPMAlignResultGraphicConstants.MatchRegion |
+                                                CogPMAlignResultGraphicConstants.Origin),
+                    "Result");
+
+                var centermarker = CreateCenterMarker(result.GetPose().TranslationX, result.GetPose().TranslationY);
+                display.StaticGraphics.Add(centermarker, "CenterMarker");
+
+                // 검색 영역 표시
+                var searchRegion = CreateSearchRegion(result);
+                display.StaticGraphics.Add(searchRegion, "SearchRegion");
+            }
+
+            display.Fit(true);
+        }
+
+        // VPP 저장
+        public void SaveToVpp(string filePath)
+        {
+            if (pmAlignTool == null)
+                throw new InvalidOperationException("PMAlignTool이 초기화되지 않았습니다.");
+
+            CogSerializer.SaveObjectToFile(pmAlignTool, filePath);
+        }
+
+        // VPP 불러오기
+        public void LoadFromVpp(string filePath)
+        {
+            if (!File.Exists(filePath))
+                throw new FileNotFoundException("VPP 파일을 찾을 수 없습니다.", filePath);
+
+            pmAlignTool = (CogPMAlignTool)CogSerializer.LoadObjectFromFile(filePath);
+        }
+
+        // 자원 해제
+        public void Dispose()
+        {
+            pmAlignTool?.Dispose();
+            trainRect = null;
+        }
+    }
+}
