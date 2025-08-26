@@ -1,0 +1,150 @@
+using System;
+using System.Windows.Forms;
+using Cognex.VisionPro;
+using Cognex.VisionPro.Display;
+using Cognex.VisionPro.Exceptions;
+
+namespace WindowsFormsApp2
+{
+    public class AcqFifoToolManager : IDisposable
+    {
+        private CogAcqFifoTool myTool;
+        private ICogAcqBrightness myBrightness;
+        private ICogAcqContrast myContrast;
+        private ICogAcqExposure myExposure;
+        private ICogAcqFifo myAcqFifo = null;
+        private ICogFrameGrabber myFrameGrabber;
+        private int numAcqs = 0;
+        private bool disposed = false;              // Dispose 중복 방지
+
+        public AcqFifoToolManager()
+        {
+            InitializeAcquisition();
+        }
+
+        public CogAcqFifoTool AcqFifoTool => myTool;
+        public ICogFrameGrabber FrameGrabber => myFrameGrabber;
+        public ICogAcqFifo AcqFifo => myAcqFifo;
+
+        // 람다식 : (입력 파라미터) => { 실행문장 블럭};
+        // ex) str => { MessageBox.Show(str); }
+        public double Brightness
+        {
+            get => myBrightness?.Brightness ?? 0;
+            set { if (myBrightness != null && value >= 0 && value <= 1) myBrightness.Brightness = value; }
+        }
+
+        public double Contrast
+        {
+            get => myContrast?.Contrast ?? 0;
+            set { if (myContrast != null && value >= 0 && value <= 1) myContrast.Contrast = value; }
+        }
+
+        public double Exposure
+        {
+            get => myExposure?.Exposure ?? 0;
+            set { if (myExposure != null && value >= 0 && value <= 10000) myExposure.Exposure = value; }
+        }
+
+        public int NumAcqs
+        {
+            get => numAcqs;
+            set => numAcqs = value;
+        }
+
+        public bool IsLiveRunning(CogDisplay display) => display.LiveDisplayRunning;
+
+        private void InitializeAcquisition()
+        {
+            try
+            {
+                myTool = new CogAcqFifoTool();
+                var frameGrabbers = new CogFrameGrabbers();
+                if (frameGrabbers.Count < 1)
+                    throw new Exception("프레임 그레버 없음");
+
+                myFrameGrabber = frameGrabbers[0];
+            }
+            catch (Exception ex)
+            {
+                // myTool, myFrameGrabber가 null이면 오류발생
+                myTool = null;
+                myFrameGrabber = null; 
+                MessageBox.Show("카메라 연결 실패: " + ex.Message);
+            }
+        }
+
+        public string[] GetAvailableVideoFormats()
+        {
+            if (myFrameGrabber == null) return Array.Empty<string>();
+            var formats = new string[myFrameGrabber.AvailableVideoFormats.Count];
+            for (int i = 0; i < formats.Length; i++)
+                formats[i] = myFrameGrabber.AvailableVideoFormats[i];
+            return formats;
+        }
+
+        public void SetVideoFormat(string formatName)
+        { // framegrabber가 null이거나 acqfifoTool이 null이면 return
+            if (myFrameGrabber == null || myTool == null) return;
+            // acqfifo는 framgegrabber 픽셀 포맷 리스트 생성
+            myAcqFifo = myFrameGrabber.CreateAcqFifo(formatName, CogAcqFifoPixelFormatConstants.Format8Grey, 0, true);
+            myTool.Operator = myAcqFifo; // myTool의 생성자는 myAcqFifo
+            myExposure = myAcqFifo.OwnedExposureParams;  
+            myBrightness = myAcqFifo.OwnedBrightnessParams;
+            myContrast = myAcqFifo.OwnedContrastParams;
+        }
+
+        public ICogImage AcquireImage()
+        {
+            if (myAcqFifo == null) return null;
+
+            myAcqFifo.Acquire(out int trignum);
+            numAcqs++;
+            if (numAcqs > 100) numAcqs = 0;
+
+            return myTool.OutputImage as ICogImage;
+        }
+
+        public void StartLive(CogDisplay display)
+        {
+            if (myAcqFifo == null) return;
+            display.StartLiveDisplay(myAcqFifo);
+            display.Fit(true);
+        }
+
+        public void StopLive(CogDisplay display)
+        {
+            if (display.LiveDisplayRunning)
+                display.StopLiveDisplay();
+        }
+
+        // IDisposable 구현
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (disposed) return;
+
+            if (disposing)
+            {
+                myTool?.Dispose();
+            }
+
+            // 비관리 리소스 해제
+            var frameGrabbers = new CogFrameGrabbers();
+            foreach (ICogFrameGrabber fg in frameGrabbers)
+                fg.Disconnect(false);
+
+            disposed = true;
+        }
+
+        ~AcqFifoToolManager()
+        {
+            Dispose(false);
+        }
+    }
+}
