@@ -1,0 +1,54 @@
+using System;
+using System.Windows.Forms;
+using WindowsFormsApp2; // AcqFifo
+using WindowsFormsApp4; // controller
+using WindowsFormsApp3; // PMAlign
+
+
+namespace WindowsFormsApp3
+{
+    public partial class VisionTool : Form
+    {
+        public VisionTool()
+        {
+            InitializeComponent();
+            this.Load += AcqFifo_Load;
+            this.Load += PMAlign_Load;
+            this.Load += controller_Load;
+            
+            
+        }
+
+        private void AcqFifo_Load(object sender, EventArgs e) // acqfifo 윈폼 불러오기
+        {
+            AcqFifo ac = new AcqFifo();
+            ac.TopLevel = false;
+            tabControl1.TabPages[tabControl1.TabPages.Count - 3].Controls.Add(ac);
+            tabControl1.SelectedIndex = tabControl1.TabPages.Count - 3;
+            ac.Dock = DockStyle.Fill;
+            ac.Show();
+        }
+
+        private void PMAlign_Load(object sender, EventArgs e) // pmaligntool 윈폼 불러오기
+        {
+            PMAlign an = new PMAlign();
+            an.TopLevel = false;
+            tabControl1.TabPages[tabControl1.TabPages.Count - 2].Controls.Add(an);
+            tabControl1.SelectedIndex = tabControl1.TabPages.Count - 2;
+            an.Dock = DockStyle.Fill;
+            an.Show();
+        }
+
+        private void controller_Load(object sender, EventArgs e) // controller 윈폼 불러오기
+        {
+            controller cr = new controller();
+            cr.TopLevel = false;
+            tabControl1.TabPages[tabControl1.TabPages.Count - 1].Controls.Add(cr);
+            tabControl1.SelectedIndex = tabControl1.TabPages.Count - 1;
+            cr.Dock = DockStyle.Fill;
+            cr.Show();
+        }
+
+       
+    }
+}
